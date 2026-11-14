@@ -308,7 +308,7 @@ async function serverDo(body,txt){
 function detectType(h){
  if(h.includes('buysall')&&h.includes('qcvcher')) return 'PCRCARD1';
  if(h.includes('passdate')&&h.includes('chqno')) return 'CHQICUST';
- if(h.includes('billamt')&&h.includes('chqcode')) return 'PAYRCV1';
+ if((h.includes('billamt')||h.includes('amt'))&&h.includes('chqcode')&&h.includes('coor')&&h.includes('tranamt')) return 'PAYRCV1';
  if(h.includes('step')&&h.includes('prodname')&&h.includes('duedate')) return 'PREFLI02';
  if(h.includes('step')&&h.includes('prodname')) return 'PREFLI01';
  if(h.includes('invpaidamt')&&h.includes('stdtotamt')) return 'PREFLI15';
@@ -350,11 +350,11 @@ function parseFile(text,fname){
   if(type==='PAYRCV1'){
    const code=g(r,'code'), date=d2iso(g(r,'date'));
    if(code&&date){
-    cur={key:code.slice(0,19),rb:code,date,name:g(r,'coor'),bill:num(g(r,'billamt')),cash:num(g(r,'cashamt')),chq:num(g(r,'chqamt')),tran:num(g(r,'tranamt')),
+    cur={key:code.slice(0,19),rb:code,date,name:g(r,'coor'),bill:num(g(r,'billamt')||g(r,'amt')),cash:num(g(r,'cashamt')),chq:num(g(r,'chqamt')),tran:num(g(r,'tranamt')),
      intr:num(g(r,'intamt')),other:num(g(r,'other')),disc:num(g(r,'discamt')),tax:num(g(r,'taxamt')),chqno:g(r,'chqcode'),chqdate:d2iso(g(r,'chqdate')),bank:g(r,'bank'),chqstat:g(r,'chqstat'),extra:[]};
     data.push(cur);
    } else if(!code&&lvl(r)===1&&g(r,'chqcode')&&cur){ cur.extra.push({ref:g(r,'chqcode'),date:d2iso(g(r,'chqdate')),bank:g(r,'bank')}); }
-   else if(!code&&lvl(r)===1&&num(g(r,'totalamt'))>0){ atfTotal=num(g(r,'totalamt')); }
+   else if(!code&&lvl(r)===1&&num(g(r,'totalamt')||g(r,'amt'))>0){ atfTotal=num(g(r,'totalamt')||g(r,'amt')); }
   } else if(type==='PREFLI15'){
    const ref=g(r,'refno'), date=d2iso(g(r,'date')), L=lvl(r);
    if(L===1&&ref&&date){ cur={key:ref.slice(0,19),rb:ref,date,ccode:g(r,'coor'),name:g(r,'name'),total:num(g(r,'stdtotamt')),note:'',inv:[]}; data.push(cur); }
