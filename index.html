@@ -272,7 +272,8 @@ async function save(){ await IDB.set('db',DB); }
 
 /* ===================== หลังบ้าน (Google Sheets / Apps Script) ===================== */
 const LS={get(k){try{return localStorage.getItem(k)||''}catch(_){return ''}},set(k,v){try{localStorage.setItem(k,v)}catch(_){}}};
-const API={url:()=>LS.get('vpar_api').trim(),pin:()=>LS.get('vpar_pin').trim(),on(){return !!this.url();}};
+const DEFAULT_API='https://script.google.com/macros/s/AKfycbzKBq5gJZLbNqGbbEccl9ageirEX3ReYiUg65yoitOOP4tfadzbCh_WmjpOq9A2qslEJw/exec';
+const API={url:()=>LS.get('vpar_api').trim()||DEFAULT_API,pin:()=>LS.get('vpar_pin').trim(),on(){return !!this.url();}};
 let USER=null, ROLE='', LASTSYNC='', CONNERR='';
 async function apiGet(url=API.url(),pin=API.pin(),action='load'){
  const r=await fetch(url+(url.includes('?')?'&':'?')+'action='+action+'&pin='+encodeURIComponent(pin));
@@ -285,6 +286,7 @@ function busy(on,txt){ $('#busy').classList.toggle('hidden',!on); if(txt) $('#bu
 async function useServer(j){ DB=normDB(j.db); USER=j.user; ROLE=j.role; LASTSYNC=new Date().toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'}); CONNERR=''; await save(); }
 async function syncLoad(){
  if(!API.on()){ updConn(); return; }
+ if(!API.pin()){ CONNERR='ยังไม่ได้ใส่ PIN'; updConn(); return; }
  busy(true,'กำลังโหลดข้อมูลจาก Google Sheets…');
  try{ await useServer(await apiGet()); }
  catch(e){ CONNERR=e.message||String(e); }
@@ -1075,7 +1077,10 @@ $('#bossSeg').onclick=e=>{ const b=e.target.closest('button'); if(!b) return; BO
 $('#bossClose').onclick=()=>$('#bossDlg').classList.add('hidden');
 $('#bossPrint').onclick=()=>{ let st=document.getElementById('pgStyle'); if(!st){ st=document.createElement('style'); st.id='pgStyle'; document.head.appendChild(st); } st.textContent='@page{size:A4 '+(BOSS_ORI==='L'?'landscape':'portrait')+';margin:12mm}'; document.body.classList.add('pboss'); window.print(); };
 window.addEventListener('afterprint',()=>{ document.body.classList.remove('pboss'); const st=document.getElementById('pgStyle'); if(st) st.textContent=''; });
-$('#bossImg').onclick=async()=>{ busy(true,'กำลังสร้างรูป…'); try{ const c=await bossCanvas(); const a=document.createElement('a'); a.href=c.toDataURL('image/png'); a.download=bossFile(); a.click(); }catch(e){ alert(e.message||e); } busy(false); };
+$('#bossImg').onclick=async()=>{ busy(true,'กำลังสร้างรูป…'); try{ const c=await bossCanvas();
+  const blob=await new Promise(r=>c.toBlob(r,'image/png')); const file=new File([blob],bossFile(),{type:'image/png'});
+  if(navigator.canShare&&navigator.canShare({files:[file]})&&matchMedia('(pointer:coarse)').matches){ busy(false); try{ await navigator.share({files:[file],title:'รายงานรับชำระและลูกหนี้'}); }catch(_){} return; }
+  const a=document.createElement('a'); a.href=c.toDataURL('image/png'); a.download=bossFile(); a.click(); }catch(e){ alert(e.message||e); } busy(false); };
 $('#bossCopy').onclick=async()=>{ busy(true,'กำลังสร้างรูป…'); try{ const c=await bossCanvas(); const blob=await new Promise(r=>c.toBlob(r,'image/png')); await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]); busy(false); alert('คัดลอกรูปแล้ว — ไปที่แชท LINE แล้วกด Ctrl+V ได้เลย'); }catch(e){ busy(false); alert('คัดลอกไม่ได้ ('+(e.message||e)+') — ใช้ปุ่ม "บันทึกเป็นรูป" แทน'); } };
 $('#btnSync').onclick=()=>{ if(!API.on()) return $('#btnSet').click(); syncLoad(); };
 $('#btnSet').onclick=()=>{ $('#setUrl').value=API.url(); $('#setPin').value=API.pin(); $('#setMsg').textContent=''; $('#setDlg').classList.remove('hidden'); };
@@ -1086,10 +1091,10 @@ $('#setTest').onclick=async()=>{ const m=$('#setMsg'); m.textContent='กำล�
 $('#setSave').onclick=async()=>{ const u=$('#setUrl').value.trim(), pn=$('#setPin').value.trim();
  const had=API.on(); const local=DB;
  LS.set('vpar_api',u); LS.set('vpar_pin',pn); $('#setDlg').classList.add('hidden');
- if(!u){ CONNERR=''; updConn(); render(); return; }
+ if(!API.url()){ CONNERR=''; updConn(); render(); return; }
  await syncLoad();
  if(!had&&!CONNERR&&!Object.keys(DB.V.receipts).length&&!Object.keys(DB.V.invoices).length&&(Object.keys(local.V.receipts).length||Object.keys(local.N.receipts).length)) alert('หลังบ้านยังว่างอยู่ — ไปที่แท็บ "นำเข้าข้อมูล" แล้วลากไฟล์ CSV เข้ามาใหม่ ข้อมูลจะถูกส่งขึ้น Google Sheets'); };
-(async()=>{ await IDB.open(); const d=await IDB.get('db'); if(d) DB=normDB(d); updConn(); if(API.on()) await syncLoad(); if(!Object.keys(DB.V.receipts).length&&!Object.keys(DB.V.invoices).length&&!Object.keys(DB.V.links).length){ S.tab='imp'; document.querySelectorAll('#tabSeg button').forEach(x=>x.classList.toggle('on',x.dataset.tab==='imp')); } render(); })();
+(async()=>{ await IDB.open(); const d=await IDB.get('db'); if(d) DB=normDB(d); updConn(); if(API.on()) await syncLoad(); if(!API.pin()){ $('#btnSet').click(); $('#setMsg').textContent='👋 ใส่ PIN ของคุณแล้วกดบันทึก (ทำครั้งแรกครั้งเดียวต่อเครื่อง)'; $('#setMsg').className='note'; setTimeout(()=>$('#setPin').focus(),50); } if(!Object.keys(DB.V.receipts).length&&!Object.keys(DB.V.invoices).length&&!Object.keys(DB.V.links).length){ S.tab='imp'; document.querySelectorAll('#tabSeg button').forEach(x=>x.classList.toggle('on',x.dataset.tab==='imp')); } render(); })();
 </script>
 </body>
 </html>
