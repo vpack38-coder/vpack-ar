@@ -308,6 +308,7 @@ async function serverDo(body,txt){
 
 /* ===================== Parsers ===================== */
 function detectType(h){
+ if(h.includes('yokmaamt')&&h.includes('yokpaiamt')) return 'PCRSTAT1';
  if(h.includes('buysall')&&h.includes('qcvcher')) return 'PCRCARD1';
  if(h.includes('passdate')&&h.includes('chqno')) return 'CHQICUST';
  if((h.includes('billamt')||h.includes('amt'))&&h.includes('chqcode')&&h.includes('coor')&&h.includes('tranamt')) return 'PAYRCV1';
@@ -316,7 +317,7 @@ function detectType(h){
  if(h.includes('invpaidamt')&&h.includes('stdtotamt')) return 'PREFLI15';
  return null;
 }
-const TYPE_LABEL={PREFLI01:'รายงานขายสด (ใบส่งของ/ใบกำกับ/ใบเสร็จ)',PCRCARD1:'การ์ดลูกหนี้ (ยอดยกมา + รับเงินขายสด)',MANUAL:'รายการรับชำระที่คีย์เอง (ไฟล์ .json)',CHQICUST:'รายงานสถานะเช็ครับแยกตามลูกค้า',PAYRCV1:'รายงานรับชำระหนี้',PREFLI15:'รายการใบเสร็จที่รับในแต่ละวัน',PREFLI02:'รายงานใบส่งของขายเชื่อ'};
+const TYPE_LABEL={PREFLI01:'รายงานขายสด (ใบส่งของ/ใบกำกับ/ใบเสร็จ)',PCRCARD1:'การ์ดลูกหนี้ (ยอดยกมา + รับเงินขายสด)',PCRSTAT1:'รายงานสถานะลูกหนี้ (ใช้เป็นยอดยกมา)',MANUAL:'รายการรับชำระที่คีย์เอง (ไฟล์ .json)',CHQICUST:'รายงานสถานะเช็ครับแยกตามลูกค้า',PAYRCV1:'รายงานรับชำระหนี้',PREFLI15:'รายการใบเสร็จที่รับในแต่ละวัน',PREFLI02:'รายงานใบส่งของขายเชื่อ'};
 
 function parseFile(text,fname){
  const rows=parseCSV(text); if(!rows.length) throw new Error('ไฟล์ว่าง');
@@ -337,6 +338,13 @@ function parseFile(text,fname){
    else if(L===1&&ref&&cur){ const chqno=g(r,'chqno');
     data.push({key:ref.slice(0,19)+'|'+chqno,rb:ref,ccode:cur.ccode,name:cur.name,status:cur.status,chqdate:d2iso(g(r,'duedate')),bank:g(r,'bank'),chqno,amt:num(g(r,'chqamt')),tobank:g(r,'tobank'),passdate:passIso(g(r,'passdate'))}); }
    continue;
+  }
+  if(type==='PCRSTAT1'){
+   if(lvl(r)!==1) continue; const code=g(r,'code'), nm=g(r,'name');
+   if(code&&!nm){ atfTotal=num(g(r,'yokmaamt')); continue; }
+   if(!code) continue;
+   const o={ccode:code,name:nm,date:from,amt:num(g(r,'yokmaamt')),sell:num(g(r,'sellamt')),rcv:num(g(r,'rcvamt')),close:num(g(r,'yokpaiamt'))};
+   opening.push(o); data.push(o); continue;
   }
   if(type==='PCRCARD1'){
    const msg=g(r,'subheadmsg'), ref=g(r,'refno');
@@ -374,7 +382,8 @@ function parseFile(text,fname){
   }
  }
  if(!from&&data.length){ const ds=data.map(d=>d.date||d.chqdate).sort(); from=ds[0]; to=ds[ds.length-1]; }
- let sum=0; if(type==='CHQICUST') sum=data.reduce((a,d)=>a+d.amt,0); else if(type==='PAYRCV1'||type==='PCRCARD1') sum=data.reduce((a,d)=>a+d.bill,0); else if(type==='PREFLI15') sum=data.reduce((a,d)=>a+d.total,0); else sum=data.reduce((a,d)=>a+d.total,0);
+ let sum=0; if(type==='CHQICUST') sum=data.reduce((a,d)=>a+d.amt,0); else if(type==='PAYRCV1'||type==='PCRCARD1') sum=data.reduce((a,d)=>a+d.bill,0);
+ else if(type==='PCRSTAT1') sum=data.reduce((a,d)=>a+d.amt,0); else if(type==='PREFLI15') sum=data.reduce((a,d)=>a+d.total,0); else sum=data.reduce((a,d)=>a+d.total,0);
  const latest=data.reduce((a,d)=>{ const x=[d.date,d.chqdate,d.passdate].filter(Boolean).sort().pop()||''; return x>a?x:a; },'');
  return {fname,type,co,title,from,to,data,atfTotal,sum:r2(sum),latest,skipped,opening};
 }
@@ -383,7 +392,8 @@ function applyBatch(b){
  const C=DB[b.co];
  C.cheques=C.cheques||{};
  if(b.type==='CHQICUST') b.data.forEach(d=>C.cheques[d.key]=d);
- else if(b.type==='PAYRCV1'||b.type==='PCRCARD1'){ b.data.forEach(d=>C.receipts[d.key]=d); (b.opening||[]).forEach(o=>{ (C.opening=C.opening||{})[o.ccode]=o; }); }
+ else if(b.type==='PAYRCV1'||b.type==='PCRCARD1'){ b.data.forEach(d=>C.receipts[d.key]=d); if(b.opening&&b.opening.length){ C.opening={}; b.opening.forEach(o=>C.opening[o.ccode]=o); } }
+ else if(b.type==='PCRSTAT1'){ C.opening={}; b.opening.forEach(o=>C.opening[o.ccode]={ccode:o.ccode,name:o.name,date:o.date,amt:o.amt}); }
  else if(b.type==='PREFLI15') b.data.forEach(d=>{ C.links[d.key]=d; delete C.manual[d.key]; });
  else b.data.forEach(d=>C.invoices[d.si]=d);
  C.imports.push({type:b.type,fname:b.fname,from:b.from,to:b.to,count:b.data.length,sum:b.sum,atfTotal:b.atfTotal,latest:b.latest,at:new Date().toISOString()});
@@ -639,14 +649,14 @@ function viewAR(){
 }
 
 /* ===================== View: สถานะลูกหนี้ (ยกมา / ขาย / ชำระ / ยกไป) ===================== */
-function stData(P){
+function stData(P,noOB){
  const C=DB[S.co], OB=C.opening||{}, AL=C.aliases||{}, nmz=n=>AL[n]||n;
  const start=P[0];
  const n2c={}, cname={};
  Object.values(M.inv).forEach(v=>{ if(!v.ccode) return; if(!n2c[v.name]) n2c[v.name]=v.ccode; if(!cname[v.ccode]||v.date>cname[v.ccode].d) cname[v.ccode]={n:v.name,d:v.date}; });
  M.recs.forEach(R=>{ const c=R.ccode||(R.r&&R.r.ccode); if(c){ if(!n2c[R.name]) n2c[R.name]=c; if(!cname[c]) cname[c]={n:R.name,d:''}; } });
  const obDate=Object.values(OB).map(o=>o.date).filter(Boolean).sort()[0]||'';
- const useOB=!!obDate, base=useOB?obDate:'0000-00-00'; let early=0;
+ const useOB=!noOB&&!!obDate&&(obDate<=start||S.mode==='all'), base=useOB?obDate:'0000-00-00'; let early=0;
  const rows={}; const row=(k,name)=>rows[k]=rows[k]||{code:k[0]==='?'?'':k,name,ob:0,sales:0,paid:0,ni:0,nr:0};
  if(useOB) Object.values(OB).forEach(o=>{ row(o.ccode,nmz(o.name)).ob+=o.amt; });
  Object.values(M.inv).forEach(v=>{ const k=v.ccode||n2c[v.name]||'?'+v.name;
@@ -656,7 +666,18 @@ function stData(P){
   if(R.date<base){ if(inP(R.date,P)) early++; return; }
   if(R.date<start) row(k,R.name).ob-=R.bill; else if(inP(R.date,P)){ const x=row(k,R.name); x.paid+=R.bill; x.nr++; } });
  const list=Object.values(rows).map(x=>{ if(x.code&&cname[x.code]) x.name=cname[x.code].n; x.ob=r2(x.ob); x.sales=r2(x.sales); x.paid=r2(x.paid); x.cl=r2(x.ob+x.sales-x.paid); return x; });
- return {list,useOB,obDate,hasOB:!!obDate,early,obStart:useOB&&start<obDate};
+ return {list,useOB,obDate,hasOB:!!obDate,early,obStart:useOB&&start<obDate,before:!!obDate&&!useOB};
+}
+function stCompare(b){
+ const keep=S.co; S.co=b.co; build(); const D=stData([b.from,b.to],true); S.co=keep; build();
+ const my={}; D.list.forEach(x=>{ if(x.code) my[x.code]=x; });
+ const bad=[]; let ms=0,mr=0;
+ b.data.forEach(o=>{ const x=my[o.ccode]||{sales:0,paid:0}; ms+=x.sales; mr+=x.paid;
+  const ds=r2(x.sales-o.sell), dr=r2(x.paid-o.rcv);
+  if(Math.abs(ds)>0.02||Math.abs(dr)>0.02) bad.push(`${o.ccode} ${o.name}: ${Math.abs(ds)>0.02?'ขาย ระบบ '+money(x.sales,false)+' / ATF '+money(o.sell,false):''} ${Math.abs(dr)>0.02?'ชำระ ระบบ '+money(x.paid,false)+' / ATF '+money(o.rcv,false):''}`); });
+ const known=new Set(b.data.map(o=>o.ccode));
+ D.list.forEach(x=>{ if(x.code&&!known.has(x.code)&&(x.sales>0.02||x.paid>0.02)) bad.push(`${x.code} ${x.name}: มีในระบบ แต่ไม่มีในรายงาน ATF (ขาย ${money(x.sales)} ชำระ ${money(x.paid)})`); });
+ return bad;
 }
 function viewST(){
  const P=period(); const D=stData(P);
@@ -672,7 +693,8 @@ function viewST(){
  let h=`<div class="sum"><span class="pill ttl">📋 สถานะลูกหนี้ <b>${periodLabel()}</b></span><span class="pill">${L.length} ราย</span>
   <label class="note"><input type="checkbox" id="stHide" ${S.stHide?'checked':''}> ซ่อนรายที่ไม่มียอด</label>
   <label class="note">เรียงตาม <select id="stSort">${[['code','รหัสลูกค้า'],['cl','ยอดหนี้ยกไป มาก→น้อย'],['sales','ยอดขาย มาก→น้อย'],['paid','ยอดชำระ มาก→น้อย']].map(([k,l])=>`<option value="${k}" ${S.stSort===k?'selected':''}>${l}</option>`).join('')}</select></label></div>`;
- if(!D.hasOB) h+=`<div class="sum" style="border-left-color:#fab219;background:#fffbeb">⚠️ ยังไม่มี <b>ยอดยกมาต้นปี</b> — ยอดหนี้ยกมา/ยกไปจะยังไม่รวมหนี้ค้างจากปีก่อน · แก้ได้โดย export <b>PCRCARD1 (การ์ดลูกหนี้)</b> ของบริษัทนี้ ตั้งแต่ 01/01/2569 แล้วนำเข้า 1 ครั้ง</div>`;
+ if(!D.hasOB) h+=`<div class="sum" style="border-left-color:#fab219;background:#fffbeb">⚠️ ยังไม่มี <b>ยอดยกมาต้นปี</b> — ยอดหนี้ยกมา/ยกไปจะยังไม่รวมหนี้ค้างจากปีก่อน · แก้ได้โดย export <b>PCRSTAT1 (รายงานสถานะลูกหนี้)</b> ช่วง 01/01/2569 – วันนี้ แล้วนำเข้า 1 ครั้ง</div>`;
+ else if(D.before) h+=`<div class="sum" style="border-left-color:#fab219;background:#fffbeb">⚠️ ช่วงที่เลือกเริ่มก่อนวันที่ของยอดยกมา (${fd(D.obDate)}) — ยอดหนี้ยกมา/ยกไปของช่วงนี้ยังไม่รวมหนี้เก่า · นำเข้า PCRSTAT1 ตั้งแต่วันที่ที่ต้องการเพื่อแก้</div>`;
  else if(D.early) h+=`<div class="sum" style="border-left-color:#fab219;background:#fffbeb">ℹ️ มี ${D.early} รายการก่อนวันที่ยอดยกมา (${fd(D.obDate)}) — ไม่นับซ้ำ เพราะรวมอยู่ในยอดยกมาแล้ว</div>`;
  h+=`<div class="kpis">
   ${K('📥 ยอดหนี้ยกมา',money(T.ob,false),`ณ ${startL}`,'#898781')}
@@ -691,7 +713,7 @@ function viewST(){
  h+=`<table class="t" id="tbl"><thead><tr><th>รหัสลูกค้า</th><th>ชื่อลูกค้า</th><th class="n">ยอดหนี้ยกมา</th><th class="n">ยอดขายในงวด</th><th class="n">ยอดชำระ/ลดหนี้</th><th class="n">ยอดหนี้ยกไป</th></tr></thead><tbody>`;
  L.forEach(x=>{ h+=`<tr><td class="nw">${esc(x.code||'-')}</td><td><span class="lnk" data-gocust="${esc(x.name)}" style="cursor:pointer" title="ดูการ์ดลูกค้า">${esc(x.name)}</span></td><td class="n">${money(x.ob)}</td><td class="n">${money(x.sales)}</td><td class="n">${money(x.paid)}</td><td class="n ${x.cl<-0.005?'bad':''}"><b>${money(x.cl)}</b></td></tr>`; });
  h+=`<tr class="tot"><td colspan="2" class="n">รวมทั้งสิ้น</td><td class="n">${money(T.ob,false)}</td><td class="n">${money(T.sales,false)}</td><td class="n">${money(T.paid,false)}</td><td class="n">${money(T.cl,false)}</td></tr></tbody></table>
- <p class="note noprint">ยอดขาย = ใบกำกับ (PREFLI02) + ขายสด (PREFLI01) · ยอดชำระ = ใบเสร็จทั้งหมด (รวมภาษีหัก ณ ที่จ่าย) · ยอดยกมา = ยอดยกมาต้นปีจากการ์ดลูกหนี้ + รายการก่อนช่วงที่เลือก · ยอดติดลบสีแดง = รับเงินเกิน/ข้อมูลใบกำกับยังไม่ครบ</p>`;
+ <p class="note noprint">ยอดขาย = ใบกำกับ (PREFLI02) + ขายสด (PREFLI01) · ยอดชำระ = ใบเสร็จทั้งหมด (รวมภาษีหัก ณ ที่จ่าย) · ยอดยกมา = ยอดยกมาจาก PCRSTAT1 / การ์ดลูกหนี้ + รายการก่อนช่วงที่เลือก · ยอดติดลบสีแดง = รับเงินเกิน/ข้อมูลใบกำกับยังไม่ครบ</p>`;
  $('#v-st').innerHTML=h;
  $('#stHide').onchange=e=>{S.stHide=e.target.checked;render();};
  $('#stSort').onchange=e=>{S.stSort=e.target.value;render();};
@@ -954,7 +976,7 @@ function viewImp(){
   h+=`<h3>ไฟล์ที่รอนำเข้า</h3><table class="t"><thead><tr><th>ไฟล์</th><th>ประเภท</th><th>บริษัท</th><th>ข้อมูลล่าสุด</th><th>ช่วงวันที่</th><th class="n">จำนวน</th><th class="n">ยอดรวม</th><th>ตรวจยอดกับท้ายรายงาน ATF</th><th></th></tr></thead><tbody>`;
   staged.forEach((b,i)=>{ const chk=b.atfTotal==null?'<span class="mut">—</span>':Math.abs(b.atfTotal-b.sum)<0.02?`<span class="ok">✓ ตรง (${money(b.atfTotal)})</span>`:`<span class="bad">✗ ATF ${money(b.atfTotal)}</span>`;
    h+=`<tr><td>${esc(b.fname)}</td><td>${b.type} · ${TYPE_LABEL[b.type]}</td><td><select data-stco="${i}"><option value="V" ${b.co==='V'?'selected':''}>00001 Vat</option><option value="N" ${b.co==='N'?'selected':''}>00002 No Vat</option></select></td><td class="c">${fd(b.latest)}</td>
-   <td class="c">${fd(b.from)} – ${fd(b.to)}</td><td class="n">${b.data.length}</td><td class="n">${money(b.sum,false)}</td><td>${chk}${b.skipped&&b.skipped.length?`<div class="warn" title="${esc(b.skipped.join('\n'))}">⚠ ขายสดที่ยังไม่ใส่รายละเอียดรับเงินใน ATF ${b.skipped.length} ใบ — จะขึ้นค้างรับ</div>`:''}</td><td><button class="b r" data-unstage="${i}">ลบ</button></td></tr>`; });
+   <td class="c">${fd(b.from)} – ${fd(b.to)}</td><td class="n">${b.data.length}</td><td class="n">${money(b.sum,false)}</td><td>${chk}${b.type==='PCRSTAT1'?(()=>{ const bad=stCompare(b); return bad.length?`<div class="warn" title="${esc(bad.join('\n'))}">⚠ ยอดขาย/ชำระในช่วงนี้ ไม่ตรงกับระบบ ${bad.length} ราย (ชี้เพื่อดู)</div>`:'<div class="ok">✓ ยอดขาย/ชำระทุกรายตรงกับระบบ</div>'; })():''}${b.skipped&&b.skipped.length?`<div class="warn" title="${esc(b.skipped.join('\n'))}">⚠ ขายสดที่ยังไม่ใส่รายละเอียดรับเงินใน ATF ${b.skipped.length} ใบ — จะขึ้นค้างรับ</div>`:''}</td><td><button class="b r" data-unstage="${i}">ลบ</button></td></tr>`; });
   h+=`</tbody></table><p><button class="b p" id="doImport">นำเข้าทั้งหมด</button> <span class="note">ระบบเดาบริษัทจากหัวรายงาน — ถ้าผิดเลือกใหม่ได้ก่อนกดนำเข้า</span></p>`;
  }
  for(const co of ['V','N']){ const C=DB[co];
