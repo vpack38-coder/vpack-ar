@@ -316,7 +316,7 @@ function detectType(h){
  if(h.includes('invpaidamt')&&h.includes('stdtotamt')) return 'PREFLI15';
  return null;
 }
-const TYPE_LABEL={PREFLI01:'รายงานขายสด (ใบส่งของ/ใบกำกับ/ใบเสร็จ)',PCRCARD1:'การ์ดลูกหนี้ (ใช้เฉพาะรับเงินขายสด SR)',MANUAL:'รายการรับชำระที่คีย์เอง (ไฟล์ .json)',CHQICUST:'รายงานสถานะเช็ครับแยกตามลูกค้า',PAYRCV1:'รายงานรับชำระหนี้',PREFLI15:'รายการใบเสร็จที่รับในแต่ละวัน',PREFLI02:'รายงานใบส่งของขายเชื่อ'};
+const TYPE_LABEL={PREFLI01:'รายงานขายสด (ใบส่งของ/ใบกำกับ/ใบเสร็จ)',PCRCARD1:'การ์ดลูกหนี้ (ยอดยกมา + รับเงินขายสด)',MANUAL:'รายการรับชำระที่คีย์เอง (ไฟล์ .json)',CHQICUST:'รายงานสถานะเช็ครับแยกตามลูกค้า',PAYRCV1:'รายงานรับชำระหนี้',PREFLI15:'รายการใบเสร็จที่รับในแต่ละวัน',PREFLI02:'รายงานใบส่งของขายเชื่อ'};
 
 function parseFile(text,fname){
  const rows=parseCSV(text); if(!rows.length) throw new Error('ไฟล์ว่าง');
